@@ -37,6 +37,10 @@ def plot_degree_by_id(g):
 # A = np.loadtxt('test.csv', delimiter=' ', dtype='int64')
 # G = nx.Graph(A)
 G = nx.read_adjlist("test.adjlist", nodetype=int)
+zero_degree_nodes = [node for node in G.nodes() if G.degree(node) == 0]
+print("#all nodes:         {}".format(G.number_of_nodes()))
+print("#all edges:         {}".format(G.number_of_edges()))
+print("#zero-degree nodes: {}".format(len(zero_degree_nodes)))
 plot_degree_histogram(G)
 plt.cla()
 plot_degree_by_id(G)

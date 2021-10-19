@@ -1,5 +1,7 @@
-go run main.go -n=100000 -p=1000 -in=0.5 -out=0.1 -r=0.25 > test.csv && python3 check.py
+```
+$ time go run main.go -n=200000 -p=2000 -in=0.9 -out=0.4 -r=0.5 > test.adjlist
 
--> 126Gbでは足りない
-
-30分？
+real    2m58.329s
+user    6m46.862s
+sys     11m54.773s
+```

@@ -11,6 +11,8 @@ import (
 	"gonum.org/v1/gonum/stat/distuv"
 )
 
+const PARALLEL = 35
+
 var (
 	numberOfNodes      int
 	numberOfPartitions int
@@ -41,27 +43,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	B := make([][]float64, numberOfPartitions)
-	for i := 0; i < numberOfPartitions; i++ {
-		B[i] = make([]float64, numberOfPartitions)
-	}
-	for i := 0; i < numberOfPartitions; i++ {
-		for j := 0; j < numberOfPartitions; j++ {
-			if i == j {
-				B[i][j] = pIn
-			} else {
-				B[i][j] = pOut
-			}
-		}
-	}
-
-	// B := sparse.NewDOK(numberOfPartitions, numberOfPartitions)
+	// B := make([][]float64, numberOfPartitions)
+	// for i := 0; i < numberOfPartitions; i++ {
+	// 	B[i] = make([]float64, numberOfPartitions)
+	// }
 	// for i := 0; i < numberOfPartitions; i++ {
 	// 	for j := 0; j < numberOfPartitions; j++ {
 	// 		if i == j {
-	// 			B.Set(i, j, pIn)
+	// 			B[i][j] = pIn
 	// 		} else {
-	// 			B.Set(i, j, pOut)
+	// 			B[i][j] = pOut
 	// 		}
 	// 	}
 	// }
@@ -73,7 +64,7 @@ func main() {
 		z[i] = int(i / int(numberOfNodes/numberOfPartitions))
 	}
 
-	expo := distuv.Exponential{Rate: r}
+	expo := distuv.Exponential{Rate: r} // 期待値は1/r
 
 	delta := make([]float64, numberOfNodes)
 	for i := 0; i < numberOfNodes; i++ {
@@ -127,55 +118,73 @@ func main() {
 	// }
 
 	edges := make(map[int][]int)
-	if numberOfNodes < 500000 {
-		// edges O(N^2)
-		for i := 0; i < numberOfNodes; i++ {
-			for j := 0; j < numberOfNodes; j++ {
-				if j == i {
-					continue // self loop
+
+	// // edges O(N^2)
+	// for i := 0; i < numberOfNodes; i++ {
+	// 	for j := 0; j < numberOfNodes; j++ {
+	// 		if j == i {
+	// 			continue // self loop
+	// 		}
+	// 		p := math.Pow(B[z[i]][z[j]], 1.0+delta[i]+delta[j])
+	// 		bern := distuv.Bernoulli{P: p}
+	// 		ele := bern.Rand()
+	// 		if ele == 1 {
+	// 			if len(edges[i]) == 0 {
+	// 				edges[i] = []int{j}
+	// 			} else {
+	// 				edges[i] = append(edges[i], j)
+	// 			}
+	// 		}
+	// 	}
+	// }
+
+	// edges 並行版 w/ lock
+	var mu sync.Mutex
+	calc := func(edges *map[int][]int, z *[]int, delta *[]float64, i, from, to int, pIn, pOut float64, ch chan int) {
+		mu.Lock()
+		defer mu.Unlock()
+		for j := from; j < to; j++ {
+			if j == i {
+				continue // self loop
+			}
+			var p float64
+			if (*z)[i] == (*z)[j] {
+				p = math.Pow(pIn, 1.0+(*delta)[i]+(*delta)[j])
+			} else {
+				p = math.Pow(pOut, 1.0+(*delta)[i]+(*delta)[j])
+			}
+			bern := distuv.Bernoulli{P: p}
+			ele := bern.Rand()
+			if ele == 1 {
+				// mu.Lock()
+				if len((*edges)[i]) == 0 {
+					(*edges)[i] = []int{j}
+				} else {
+					(*edges)[i] = append((*edges)[i], j)
 				}
-				p := math.Pow(B[z[i]][z[j]], 1.0+delta[i]+delta[j])
-				bern := distuv.Bernoulli{P: p}
-				ele := bern.Rand()
-				if ele == 1 {
-					if len(edges[i]) == 0 {
-						edges[i] = []int{j}
-					} else {
-						edges[i] = append(edges[i], j)
-					}
-				}
+				// mu.Unlock()
 			}
 		}
-	} else {
-		// edges 並行版 w/ lock
-		var mu sync.Mutex
-		calc := func(edges map[int][]int, B *[][]float64, z *[]int, delta *[]float64, i int, ch chan int) {
-			for j := 0; j < numberOfNodes; j++ {
-				if j == i {
-					continue // self loop
-				}
-				p := math.Pow((*B)[(*z)[i]][(*z)[j]], 1.0+(*delta)[i]+(*delta)[j])
-				bern := distuv.Bernoulli{P: p}
-				ele := bern.Rand()
-				if ele == 1 {
-					mu.Lock()
-					if len(edges[i]) == 0 {
-						edges[i] = []int{j}
-					} else {
-						edges[i] = append(edges[i], j)
-					}
-					mu.Unlock()
-				}
+		ch <- 1
+	}
+	ch := make(chan int)
+	for i := 0; i < numberOfNodes; i++ {
+		last := numberOfNodes % PARALLEL
+		width := (numberOfNodes - last) / PARALLEL
+		for j := 0; j < PARALLEL; j++ {
+			var from, to int
+			if j != PARALLEL-1 {
+				from = j * width
+				to = (j + 1) * width
+			} else {
+				from = j * width
+				to = j + last
 			}
-			ch <- 1
+			go calc(&edges, &z, &delta, i, from, to, pIn, pOut, ch)
 		}
-		ch := make(chan int)
-		for i := 0; i < numberOfNodes; i++ {
-			go calc(edges, &B, &z, &delta, i, ch)
-		}
-		for i := 0; i < numberOfNodes; i++ {
-			<-ch // wait goroutines
-		}
+	}
+	for i := 0; i < numberOfNodes; i++ {
+		<-ch // wait goroutines
 	}
 
 	for u := 0; u < numberOfNodes; u++ {
