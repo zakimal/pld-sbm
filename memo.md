@@ -1,3 +1,5 @@
+- ./pldsbm -n=10000 -p=100
+
 ```
 #all nodes:         10000
 #all edges:         8242
@@ -324,6 +326,8 @@ done pin=0.9 pout=0.8
 #zero-degree nodes: 309
 done pin=0.9 pout=0.9
 ```
+
+- ./pldsbm -n=100000 -p=100
 
 ---
 

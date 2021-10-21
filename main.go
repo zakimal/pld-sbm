@@ -21,6 +21,34 @@ var (
 	r                  float64
 )
 
+type safeMap struct {
+	sync.Mutex
+	dict map[int][]int
+}
+
+func newSafeMap() *safeMap {
+	return &safeMap{
+		dict: make(map[int][]int),
+	}
+}
+
+func (m *safeMap) Set(key int, value int) {
+	m.Lock()
+	if len(m.dict[key]) == 0 {
+		m.dict[key] = []int{value}
+	} else {
+		m.dict[key] = append(m.dict[key], value)
+	}
+	m.Unlock()
+}
+
+func (m *safeMap) Get(key int) []int {
+	m.Lock()
+	value := m.dict[key]
+	m.Unlock()
+	return value
+}
+
 func init() {
 	flag.IntVar(&numberOfNodes, "n", 0, "Number of nodes")                                      // -n=100
 	flag.IntVar(&numberOfPartitions, "p", 0, "Number of partitions")                            // -p=10
@@ -117,7 +145,8 @@ func main() {
 	// 	<-ch // wait goroutines
 	// }
 
-	edges := make(map[int][]int)
+	// edges := make(map[int][]int)
+	edges := newSafeMap()
 
 	// // edges O(N^2)
 	// for i := 0; i < numberOfNodes; i++ {
@@ -140,7 +169,7 @@ func main() {
 
 	// edges 並行版 w/ lock
 	var mu sync.Mutex
-	calc := func(edges *map[int][]int, z *[]int, delta *[]float64, i, from, to int, pIn, pOut float64, ch chan int) {
+	calc := func(edges *safeMap, z *[]int, delta *[]float64, i, from, to int, pIn, pOut float64, ch chan int) {
 		mu.Lock()
 		defer mu.Unlock()
 		for j := from; j < to; j++ {
@@ -156,13 +185,7 @@ func main() {
 			bern := distuv.Bernoulli{P: p}
 			ele := bern.Rand()
 			if ele == 1 {
-				// mu.Lock()
-				if len((*edges)[i]) == 0 {
-					(*edges)[i] = []int{j}
-				} else {
-					(*edges)[i] = append((*edges)[i], j)
-				}
-				// mu.Unlock()
+				(*edges).Set(i, j)
 			}
 		}
 		ch <- 1
@@ -180,7 +203,7 @@ func main() {
 				from = j * width
 				to = j + last
 			}
-			go calc(&edges, &z, &delta, i, from, to, pIn, pOut, ch)
+			go calc(edges, &z, &delta, i, from, to, pIn, pOut, ch)
 		}
 	}
 	for i := 0; i < numberOfNodes; i++ {
@@ -188,7 +211,7 @@ func main() {
 	}
 
 	for u := 0; u < numberOfNodes; u++ {
-		neighbors := edges[u]
+		neighbors := edges.Get(u)
 		if len(neighbors) == 0 {
 			fmt.Printf("%d\n", u)
 		} else {
